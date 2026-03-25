@@ -44,6 +44,13 @@ var failSound;
 var collectableSound;
 var winSound;
 
+// New feature variables
+var jumpCount;
+var jumpTarget;
+var highScore;
+var gameTimer;
+var timerWarned;
+
 
 
 function preload()
@@ -118,6 +125,11 @@ function startGame(){
         attack = false;
         isContact = false;
         win = false;
+        jumpCount = 0;
+        jumpTarget = floorPos_y - 150;
+        highScore = highScore || 0;
+        gameTimer = 180;
+        timerWarned = false;
         looserDisplay = false;
         winnerDisplay = false;
         checkPoint = false;
@@ -156,6 +168,9 @@ function startGame(){
         platforms.push(createPlatforms(3350,floorPos_y - 60,100))
         platforms.push(createPlatforms(3550,floorPos_y - 60,100))
         platforms.push(createPlatforms(3900,floorPos_y - 70,100))
+        // Moving platforms
+        platforms.push(createPlatforms(2050, floorPos_y - 120, 80, 1.5, 120))
+        platforms.push(createPlatforms(3680, floorPos_y - 110, 70, 2.0, 100))
 
         trees = 
             [{x_pos: -250, height:60},
@@ -254,9 +269,10 @@ function draw()
     }
 
 
-    //Draw platforms
+    //Draw platforms (update moving ones first)
     for (let i = 0; i < platforms.length; i++)
     {
+        platforms[i].update();
         platforms[i].draw();
     }
 
@@ -292,14 +308,33 @@ function draw()
     {
         enemies[i].draw();
 
-        var isContacto = enemies[i].checkContact(gameChar_x, gameChar_y)
-
-        if (isContacto)
-        {   
-            attack = true;
-            break;
+        // Stomp check: player falls on top of enemy
+        var stomped = false;
+        if (isFalling && !isContact &&
+            abs(gameChar_x - enemies[i].currentX) < 22 &&
+            gameChar_y >= enemies[i].y - 20 &&
+            gameChar_y <= enemies[i].y + 5)
+        {
+            enemies.splice(i, 1);
+            i--;
+            game_score += 3;
+            isUp = true;
+            isFalling = false;
+            jumpCount = 0;
+            jumpTarget = gameChar_y - 80;
+            collectableSound.play();
+            stomped = true;
         }
 
+        if (!stomped && i < enemies.length)
+        {
+            var isContacto = enemies[i].checkContact(gameChar_x, gameChar_y);
+            if (isContacto)
+            {
+                attack = true;
+                break;
+            }
+        }
     }
     if (attack)
     {   
@@ -353,7 +388,7 @@ function draw()
     textSize(16)
     text(game_score, width - 95, 35);
     noStroke()
-    
+
     fill(255, 195, 0)
     rect(width - 50, 30 +1, 20,20 - 26)
     fill(0, 231, 255)
@@ -363,6 +398,44 @@ function draw()
     stroke(1)
     line(width - 70, 28, width - 50, 30 - 2)
     noStroke();
+
+    // High score display
+    fill(180, 130, 0);
+    textSize(13);
+    text('BEST: ' + highScore, width - 100, 55);
+
+    // Timer logic and display
+    if (!dead && !flagpole.isReached && !looserDisplay && !winnerDisplay) {
+        gameTimer -= 1 / frameRate();
+    }
+    if (gameTimer < 0) gameTimer = 0;
+
+    var timerDisplay = ceil(gameTimer);
+    if (timerDisplay <= 30) {
+        fill(255, 0, 0);
+    } else if (timerDisplay <= 60) {
+        fill(255, 140, 0);
+    } else {
+        fill(0, 0, 0);
+    }
+    textSize(18);
+    text('TIEMPO: ' + timerDisplay, width/2 - 45, 35);
+
+    // Timer hints
+    if (timerDisplay <= 30 && !timerWarned) {
+        timerWarned = true;
+    }
+
+    // Timer ran out
+    if (gameTimer <= 0 && !dead && !flagpole.isReached && !looserDisplay) {
+        lives -= 1;
+        if (lives > 0) {
+            failSound.play();
+        } else {
+            lostSound.play();
+        }
+        startGame();
+    }
 
     //Delimiting limits
     if(gameChar_x < width/2)
@@ -423,10 +496,22 @@ function keyPressed()
                     isRight = true;
                 } else if (keyCode == 32)
                 {
-                    if (isFalling == false)
+                    if (!isFalling && jumpCount === 0)
                     {
+                        // First jump
                         jumpSound.play();
                         isUp = true;
+                        jumpCount = 1;
+                        jumpTarget = floorPos_y - 150;
+                    }
+                    else if (isFalling && !isContact && jumpCount === 1)
+                    {
+                        // Double jump in mid-air
+                        jumpSound.play();
+                        isUp = true;
+                        isFalling = false;
+                        jumpCount = 2;
+                        jumpTarget = gameChar_y - 100;
                     }
                 }
             }
@@ -655,16 +740,19 @@ function drawCollectables(t_collectable)
 {
     checkCollectable(t_collectable);
 
-    fill(255, 195, 0)
-    rect(t_collectable.x_pos, t_collectable.y_pos +1, t_collectable.size,t_collectable.size - 26)  
-    fill(0, 231, 255)
-    rect(t_collectable.x_pos + t_collectable.size, t_collectable.y_pos - 10, 0.2 * t_collectable.size, 0.8 * t_collectable.size)
-    rect(t_collectable.x_pos + t_collectable.size, t_collectable.y_pos - 1, t_collectable.size - 5,t_collectable.size - 23)
-    rect(t_collectable.x_pos + t_collectable.size * 1.6, t_collectable.y_pos - 6, 0.2 * t_collectable.size, 0.4 * t_collectable.size)
-    stroke(1)
-    line(t_collectable.x_pos, t_collectable.y_pos - 2, t_collectable.x_pos - 20, t_collectable.y_pos - 2)
-    noStroke();
+    // Bobbing animation: each collectable bobs at slightly different phase
+    var bob = sin(frameCount * 0.07 + t_collectable.x_pos * 0.02) * 5;
+    var y = t_collectable.y_pos + bob;
 
+    fill(255, 195, 0)
+    rect(t_collectable.x_pos, y + 1, t_collectable.size, t_collectable.size - 26)
+    fill(0, 231, 255)
+    rect(t_collectable.x_pos + t_collectable.size, y - 10, 0.2 * t_collectable.size, 0.8 * t_collectable.size)
+    rect(t_collectable.x_pos + t_collectable.size, y - 1, t_collectable.size - 5, t_collectable.size - 23)
+    rect(t_collectable.x_pos + t_collectable.size * 1.6, y - 6, 0.2 * t_collectable.size, 0.4 * t_collectable.size)
+    stroke(1)
+    line(t_collectable.x_pos, y - 2, t_collectable.x_pos - 20, y - 2)
+    noStroke();
 }
 
 function checkCollectable(f_collectable){
@@ -704,6 +792,7 @@ function drawPlatforms () {
             {
                 isContact = true;
                 isFalling = false;
+                jumpCount = 0;
                 break;
             } else if (d_x < 5 || d_xfinal < 5){
                 isContact = false;
@@ -715,12 +804,13 @@ function drawPlatforms () {
             }
         }
         if (isFalling == true)
-        {   
+        {
             gameChar_y += 2;
             if (gameChar_y >= floorPos_y)
             {
                 isFalling = false;
-                gameChar_y = floorPos_y
+                gameChar_y = floorPos_y;
+                jumpCount = 0;
             }
         }
     }
@@ -811,7 +901,7 @@ function characterMovements() {
     if(isUp == true)
     {
         gameChar_y -= 4;
-        if (gameChar_y <= floorPos_y - 150)
+        if (gameChar_y <= jumpTarget)
         {
             isUp = false;
             isFalling = true;
@@ -864,14 +954,23 @@ function startDisplay (){
 }
 
 function startWinnerDisplay(){
-    stroke(0)
+    stroke(0);
     win = true;
-    fill(255)
-    textSize(25)
-    text("LEVEL COMPLETE. Press space to continue.", 288, height/2)
-    text("Your score is " + game_score + ".", 288 + 180, height/2 + 40)
-    textSize(15)
-    noStroke()
+    // Update high score
+    if (game_score > highScore) {
+        highScore = game_score;
+    }
+    fill(255);
+    textSize(25);
+    text("LEVEL COMPLETE. Press space to continue.", 288, height/2);
+    text("Your score is " + game_score + ".", 288 + 180, height/2 + 40);
+    if (game_score >= highScore && game_score > 0) {
+        fill(255, 215, 0);
+        textSize(20);
+        text("NUEVA PUNTUACION MAXIMA: " + highScore + "!", 288 + 80, height/2 + 75);
+    }
+    textSize(15);
+    noStroke();
 }
 
 function victoryJump() {
@@ -882,27 +981,43 @@ function victoryJump() {
 
 }
 
-function createPlatforms (x,y,length)
+function createPlatforms (x, y, length, speed, moveRange)
 {
     var p = {
         x: x,
         y: y,
         length: length,
+        speed: speed || 0,
+        moveRange: moveRange || 0,
+        startX: x,
+        dir: 1,
+        update: function ()
+        {
+            if (this.speed > 0) {
+                this.x += this.speed * this.dir;
+                if (this.x > this.startX + this.moveRange) { this.dir = -1; }
+                else if (this.x < this.startX - this.moveRange) { this.dir = 1; }
+            }
+        },
         draw: function ()
         {
-            fill (44, 139, 0)
-            rect(this.x, this.y, this.length, 10)
+            if (this.speed > 0) {
+                fill(30, 100, 180); // moving platforms are blue
+            } else {
+                fill(44, 139, 0);
+            }
+            rect(this.x, this.y, this.length, 10);
         },
         checkContact: function (gc_x, gc_y)
         {
             if (gc_x > this.x && gc_x < this.x + this.length)
             {
-                var d = this.y - gc_y
+                var d = this.y - gc_y;
                 if (d >= 0 && d < 5)
                 {
                     return true;
                 }
-                return false
+                return false;
             }
         }
     }
