@@ -55,9 +55,16 @@ var timerWarned;
 
 function preload()
 {
-    soundFormats('mp3','wav')
+    // Sounds are loaded in setup() to avoid hanging on the loading screen
+    // due to the browser's AudioContext autoplay policy
+}
 
-    //load sounds here
+function setup()
+{
+    createCanvas(1024, 576);
+    userStartAudio();
+
+    soundFormats('mp3','wav')
     jumpSound = loadSound('assets/jump.wav')
     lostSound = loadSound('assets/lost.mp3')
     moreLivesSound = loadSound('assets/lives.wav')
@@ -71,11 +78,6 @@ function preload()
     collectableSound.setVolume(0.1)
     winSound.setVolume(0.4)
 
-}
-
-function setup()
-{
-    createCanvas(1024, 576);
     floorPos_y = height * 3/4;
     lives = 3;
     startGame();
